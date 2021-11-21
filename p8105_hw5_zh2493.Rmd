@@ -1,0 +1,198 @@
+---
+title: "p8105_hw5_zh2493"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+```
+
+## problem 1
+
+data on homicides 
+```{r}
+homicide_df = 
+  read_csv("./data/homicide-data.csv", na = c(" ", "Unknown")) %>% 
+  mutate(city_state = str_c(city, state)) %>% 
+  mutate(resolution = case_when(
+    disposition == "Closed without arrest" ~ "unsolved",
+    disposition == "Closed by arrest" ~ "solved",
+    disposition == "Open/No arrest" ~ "unsolved"
+  )) %>% 
+  filter(city_state != "TulsaAL") %>% 
+  select(city_state, everything())
+  
+```
+
+ 
+```{r}
+# total and unsolved
+homicide_df %>% 
+  group_by(city_state) %>% 
+  summarize(n = n(), unsolved = sum(resolution == "unsolved")) 
+```
+
+```{r}
+baltimore_df = 
+  homicide_df %>% 
+  filter(city_state == "BaltimoreMD")
+
+baltimore_summary = 
+baltimore_df %>% 
+  summarize(n = n(), unsolved = sum(resolution == "unsolved"))  
+  
+# prop.test function
+baltimore_test = 
+  prop.test(
+  x = baltimore_summary %>% pull(unsolved),
+  n = baltimore_summary %>% pull(n))
+
+baltimore_test %>% 
+  broom::tidy()
+```
+
+let's try to iterate across cities
+```{r}
+prop_test_function = function(city_df){
+  
+  city_summary = 
+    city_df %>% 
+      summarize(n = n(), unsolved = sum(resolution == "unsolved"))  
+    
+  # prop.test function
+  city_test = 
+    prop.test(
+    x = city_summary %>% pull(unsolved),
+    n = city_summary %>% pull(n))
+  
+  return(city_test)
+}
+
+
+homicide_df %>% 
+  filter(city_state == "LouisvilleKY") %>% 
+  prop_test_function()
+  
+
+```
+
+
+let's iterate across all cities.
+
+```{r}
+results_df =
+  homicide_df %>% 
+  nest(data = uid:resolution) %>% 
+  mutate(
+    test_results = map(data,  prop_test_function),
+    tidy_results = map(test_results, broom::tidy)) %>% 
+  select(city_state, tidy_results) %>% 
+  unnest(tidy_results) %>% 
+  select(city_state, estimate, starts_with("conf"))
+```
+
+error_bar
+
+```{r}
+results_df %>% 
+  mutate(city_state = fct_reorder(city_state, estimate)) %>% 
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+```{r}
+homicide_df %>% 
+  group_by(city_state) %>% 
+  summarize(
+    unsolved = sum(resolution == "unsolved"),
+    n = n()
+  ) %>% 
+  mutate(
+    test_results = map2(unsolved, n, prop.test),
+         tidy_results = map(test_results, broom::tidy)) %>% 
+  select(city_state , tidy_results) %>% 
+  unnest(tidy_results) %>% 
+  select(city_state, estimate, starts_with("conf"))
+```
+
+
+
+## Problem2
+let's try to iterate across file names
+```{r, warning = FALSE, message = FALSE}
+library(tidyr)
+data_path = "./data/data"
+
+filename1 = 
+  list.files(data_path) 
+
+
+study_df = 
+  tibble(filename1) %>% 
+  mutate(
+    map_df(filename1, ~ read_csv(file.path(data_path, .)))) %>% 
+  janitor::clean_names() %>% 
+  separate(filename1, into = c("filename", "c"), sep = "\\.") %>% 
+  select(-c)
+
+study_df$arm = 
+  ifelse(substr(study_df$filename, 1 , 3) == 'con', 'con', 'exp')
+
+head(study_df) %>% knitr::kable()
+```
+
+```{r}
+study_df %>% 
+  pivot_longer(
+    cols = starts_with("week"), 
+    names_to = "week", 
+    values_to = "observations"
+    ) %>% 
+  ggplot(aes(x = week, y = observations, group = filename, color = factor(arm))) +
+  labs(list(title = " observations on each subject over time", y = "observations", x = "week")) + 
+  geom_line() +
+  geom_point() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+* the experiment group is increasing and the control group stay the same.
+
+
+## Problem3
+library(tidyverse)
+```{r}
+library(tidyverse)
+
+set.seed(10)
+
+iris_with_missing = iris %>% 
+  map_df(~replace(.x, sample(1:150, 20), NA)) %>%
+  mutate(Species = as.character(Species))
+```
+
+
+```{r}
+fill_in_function = function(x){
+  
+  if(is.numeric(x)){
+    
+    replace(x, is.na(x), mean(x, na.rm = TRUE))
+    
+  }
+  else if(is.character(x)){
+    
+    replace(x, is.na(x), "virginica")
+    
+  }
+}
+
+iris = map_df(iris_with_missing, fill_in_function)
+
+head(iris) %>% knitr::kable()
+
+```
+
